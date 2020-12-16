@@ -1,6 +1,6 @@
 /*
     Modbus.h - Header for Modbus Base Library
-    Copyright (C) 2014 Andr� Sarmento Barbosa
+    Copyright (C) 2014 Andr� Sarmento Barbosa
 */
 #include "Arduino.h"
 
@@ -43,6 +43,7 @@ enum {
 typedef struct TRegister {
     word address;
     word value;
+    word previousValue;
     struct TRegister* next;
 } TRegister;
 
@@ -81,6 +82,13 @@ class Modbus {
         void addHreg(word offset, word value = 0);
         bool Hreg(word offset, word value);
         word Hreg(word offset);
+    // show all stored Hregs data // Gogicool
+    void showHregs();
+    // return the first Hreg's register if it is changed
+    // next call wiil find next change anomng Hregs;
+    // in nothing changed then return 0;
+    // @return номер первого регистра Modbus в котором обнаружены изменения
+    word checkHregUpdate();
 
         #ifndef USE_HOLDING_REGISTERS_ONLY
             void addCoil(word offset, bool value = false);
