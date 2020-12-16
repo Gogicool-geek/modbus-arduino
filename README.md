@@ -1,3 +1,10 @@
+Fork 16/12/2020
+======
+1. Added showHregs() and checkHregUpdate() in Modbus.h<p>
+<b>showHregs()</b> shows all stored Hregs data. It is for debug purpose.<p>
+<b>checkHregUpdate() </b>return the first Hreg's register if it is changed. Next call wiil find next change anomng Hregs. If nothing was changed then return 0.
+2. Added  wrong bytes filter in ModbusSerial.cpp recieve(). In case of bad signal on line there are a lot of FF FF .. bytes come in front of payload. Added filter clean it and make bad frame good.
+
 Modbus Library for Arduino
 ==========================
 
