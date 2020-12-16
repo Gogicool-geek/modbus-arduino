@@ -89,20 +89,80 @@ bool ModbusSerial::config(Serial_* port, long baud, u_int format, int txPin) {
 }
 #endif
 
-bool ModbusSerial::receive(byte* frame) {
+bool ModbusSerial::receive(byte *frame)
+{
+    // very often the first bytes are FF - is line noice
+    // try to filter it
+    while ((frame[0] == 0xFF) && (_len > 6))
+    {
+        // posible broadcast packet if CRC OK
+        u_int crc = ((frame[_len - 2] << 8) | frame[_len - 1]);
+        if (crc != this->calcCrc(_frame[0], _frame + 1, _len - 3))
+        {
+
+#ifdef DEBUG_NETWORK
+            Serial.print(F("RS485 bad packet: "));
+            for (size_t i = 0; i < _len; i++)
+            {
+                Serial.print(frame[i], HEX);
+                Serial.print(" ");
+            }
+            Serial.println(F(" -> fixed"));
+#endif
+            // error -> try to exclude first byte
+            for (uint8_t i = 0; i < _len - 1; i++)
+            {
+                frame[i] = frame[i + 1];
+            }
+            _len = _len - 1;
+        }
+        else
+        {
+// CRC Ok
+#ifdef DEBUG_NETWORK
+            Serial.print(F("RS485 good multicast packet: "));
+            for (size_t i = 0; i < _len; i++)
+            {
+                Serial.print(frame[i], HEX);
+                Serial.print(" ");
+            }
+            Serial.println();
+#endif
+            //PDU starts after first byte
+            //framesize PDU = framesize - address(1) - crc(2)
+            this->receivePDU(frame + 1);
+            //No reply to Broadcasts
+            _reply = MB_REPLY_OFF;
+            return true;
+        }
+    }
+
     //first byte of frame = address
     byte address = frame[0];
+    //Slave Check & minimal lenght chceck
+    if ((address != 0xFF && address != this->getSlaveId()) && _len > 6)
+    {
+        return false;
+    }
+
+#ifdef DEBUG_NETWORK
+    Serial.print(F("RS485 receive:\t"));
+    for (size_t i = 0; i < _len; i++)
+    {
+        Serial.print(frame[i], HEX);
+        Serial.print(F(" "));
+    }
+    Serial.print(F("\n"));
+#endif
+    //CRC Check
     //Last two bytes = crc
     u_int crc = ((frame[_len - 2] << 8) | frame[_len - 1]);
-
-    //Slave Check
-    if (address != 0xFF && address != this->getSlaveId()) {
-		return false;
-	}
-
-    //CRC Check
-    if (crc != this->calcCrc(_frame[0], _frame+1, _len-3)) {
-		return false;
+    if (crc != this->calcCrc(_frame[0], _frame + 1, _len - 3))
+    {
+#ifdef DEBUG_NETWORK
+        Serial.print(F("\tCRC wrong\n"));
+#endif
+        return false;
     }
 
     //PDU starts after first byte
@@ -131,6 +191,16 @@ bool ModbusSerial::send(byte* frame) {
     if (this->_txPin >= 0) {
         digitalWrite(this->_txPin, LOW);
     }
+#ifdef DEBUG_NETWORK
+    Serial.print(F("RS485 send: "));
+    for (size_t i = 0; i < _len; i++)
+    {
+        Serial.print(frame[i], HEX);
+        Serial.print(" ");
+    }
+    Serial.print(F("\n"));
+#endif
+    return true;
 }
 
 bool ModbusSerial::sendPDU(byte* pduframe) {
@@ -139,17 +209,16 @@ bool ModbusSerial::sendPDU(byte* pduframe) {
         delay(1);
     }
 
+    word crc = calcCrc(_slaveId, _frame, _len);
     //Send slaveId
     (*_port).write(_slaveId);
-
     //Send PDU
     byte i;
-    for (i = 0 ; i < _len ; i++) {
+    for (i = 0; i < _len; i++)
+    {
         (*_port).write(pduframe[i]);
     }
-
     //Send CRC
-    word crc = calcCrc(_slaveId, _frame, _len);
     (*_port).write(crc >> 8);
     (*_port).write(crc & 0xFF);
 
@@ -159,17 +228,36 @@ bool ModbusSerial::sendPDU(byte* pduframe) {
     if (this->_txPin >= 0) {
         digitalWrite(this->_txPin, LOW);
     }
+
+#ifdef DEBUG_NETWORK
+    Serial.print(F("RS485 sendPDU:\t"));
+    Serial.print(_slaveId, HEX);
+    Serial.print(F(" "));
+    for (size_t i = 0; i < _len; i++)
+    {
+        Serial.print(pduframe[i], HEX);
+        Serial.print(" ");
+    }
+    Serial.print(crc >> 8, HEX);
+    Serial.print(F(" "));
+    Serial.print(crc >> 8, HEX);
+    Serial.print(F("\n"));
+#endif
+    return true;
 }
 
-void ModbusSerial::task() {
+void ModbusSerial::task()
+{
     _len = 0;
 
-    while ((*_port).available() > _len)	{
+    while ((*_port).available() > _len)
+    {
         _len = (*_port).available();
         delayMicroseconds(_t15);
     }
-
-    if (_len == 0) return;
+#define MINIMAL_PACKET_LENGHT 8
+    if (_len < MINIMAL_PACKET_LENGHT)
+        return;
 
     byte i;
     _frame = (byte*) malloc(_len);
